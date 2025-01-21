@@ -1,6 +1,11 @@
 # simple-otel-collector
 Get a simple OTel Collector up and running quickly in K8s for testing purposes
 
+## Pre-requisites
+
+1. [Telemetrygen](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/cmd/telemetrygen) (if you want to send fake telemetry)
+
+
 ## Store your License Key
 ```
 kubectl create secret generic newrelic-license --from-literal=license-key=XXXXXXXXNRAL -n simple
@@ -20,8 +25,16 @@ helm upgrade --install simple-otel-collector open-telemetry/opentelemetry-collec
 ```
 
 ## Generate Telemetry
+
+Set up port forwarding.
 ```
-telemetrygen traces --otlp-insecure --otlp-endpoint "localhost:9777"
-while true; do telemetrygen traces --otlp-insecure --otlp-endpoint "localhost:9777"; sleep 5; done
+kubectl port-forward svc/simple-otel-collector-dep 4317 -n simple
+```
+
+In a new terminal window:
+
+```
+telemetrygen traces --otlp-insecure --otlp-endpoint "localhost:4317"
+while true; do telemetrygen traces --otlp-insecure --otlp-endpoint "localhost:8888"; sleep 5; done
 ```
 
