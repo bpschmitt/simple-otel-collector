@@ -23,6 +23,10 @@ extraEnvs:
     valueFrom: 
       fieldRef:
         fieldPath: status.podIP
+  - name: KUBE_NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
 
 # Handles basic configuration of components that
 # also require k8s modifications to work correctly.
@@ -128,6 +132,15 @@ config:
       limit_percentage: 80
       # By default spike_limit_mib is set to 25% of ".Values.resources.limits.memory"
       spike_limit_percentage: 25
+    # memory_limiter:
+      # check_interval is the time between measurements of memory usage.
+      # check_interval: 5s
+      # limit_mib: 20
+      # spike_limit_mib: 5
+      # By default limit_mib is set to 80% of ".Values.resources.limits.memory"
+      # limit_percentage: 15
+      # By default spike_limit_mib is set to 25% of ".Values.resources.limits.memory"
+      # spike_limit_percentage: 5
     
     resource:
       attributes:
@@ -164,18 +177,63 @@ config:
       config:
         scrape_configs:
           - job_name: opentelemetry-collector
-            scrape_interval: 10s
+            scrape_interval: 30s
             static_configs:
               - targets:
                   - ${env:MY_POD_IP}:8888
             metric_relabel_configs:
-              # Workaround for NR Entity Synthesis pipeline
-              - source_labels: [service_name]
-                target_label: __tmp_service_name
+              # You can relocate these attributes if you decide you need them.
+              # - source_labels: [service_name]
+              #   target_label: __tmp_service_name
+              # - source_labels: [service_instance_id]
+              #   target_label: __tmp_service_instance_id
+              # - source_labels: [service_version]
+              #   target_label: __tmp_service_version
+              # Drop service attributes so NR entties are not created
               - regex: "service_name|service_instance_id|service_version"
                 action: labeldrop
-
-
+              - action: replace
+                target_label: job_label
+                replacement: opentelemetry-collector
+          - job_name: kubernetes-apps
+            scrape_interval: 30s
+            kubernetes_sd_configs:
+            - role: pod
+              selectors:
+              - role: pod
+                # only scrape data from pods running on the same node as collector
+                # KUBE_NODE_NAME must be defined on the OTel collector pod
+                field: "spec.nodeName=${KUBE_NODE_NAME}"
+            relabel_configs:
+            # scrape pods annotated with "prometheus.io/scrape: true"
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              regex: "true"
+              action: keep
+            # read the port from "prometheus.io/port: <port>" annotation and update scraping address accordingly
+            - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+              action: replace
+              target_label: __address__
+              regex: ([^:]+)(?::\d+)?;(\d+)
+              # escaped $1:$2
+              replacement: $$1:$$2
+            - source_labels: [__meta_kubernetes_namespace]
+              action: replace
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              action: replace
+              target_label: pod
+            metric_relabel_configs:
+            ## Use this to match on metrics you want to drop
+            # - source_labels: [ __name__ ]
+            #   regex: 'coredns_.*'
+            #   action: drop
+            ## Use this to match on metrics you want to keep
+            # - source_labels: [ __name__ ]
+            #   regex: 'otelcol_.*'
+            #   action: keep
+            - action: replace
+              target_label: job_label
+              replacement: kubernetes-apps
             
     # zipkin:
     #   endpoint: ${env:MY_POD_IP}:9411
